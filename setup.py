@@ -17,6 +17,8 @@ setup(
         "cv_bridge",
         "ultralytics",
         "opencv-python",
+        "ros2-numpy",
+        "scikit-learn",
     ],
     zip_safe=True,
     maintainer="tristan",
@@ -26,7 +28,8 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "yolo_detector = rbi_perception_pkg.yolo_detection_node:main"
+            "yolo_detector = rbi_perception_pkg.yolo_detection_node:main",
+            "lidar_detector = rbi_perception_pkg.pcl_detection:main",
         ],
     },
 )
