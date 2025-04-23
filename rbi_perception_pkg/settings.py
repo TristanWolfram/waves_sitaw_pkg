@@ -9,7 +9,7 @@ IMAGE_TOPIC = "/sim_cam_color_0/image_color"
 DETECTION_TOPIC = "/sim_inmgs/detections"
 
 # YOLO model weights
-MODEL_WEIGHTS = "yolov8n.pt"
+MODEL_WEIGHTS = "yolo11n.pt"
 
 # Other potential future settings
 # FRAME_RATE = 10  # in Hz
