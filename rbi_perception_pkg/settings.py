@@ -6,10 +6,10 @@ Add more settings here as needed.
 
 # ROS topic names
 IMAGE_TOPIC = "/sim_cam_color_0/image_color"
-DETECTION_TOPIC = "/sim_imgs/detections"
+DETECTION_TOPIC = "/perception/detections"
 
 # YOLO model weights
-MODEL_WEIGHTS = "yolo11n.pt"
+MODEL_WEIGHTS = "yolo12n.pt"
 
 # Other potential future settings
 # FRAME_RATE = 10  # in Hz

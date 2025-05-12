@@ -1,3 +1,5 @@
 rbi_perception_pkg/testing/videos
 
 *.pt
+*.onnx
+*.jpg

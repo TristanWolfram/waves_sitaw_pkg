@@ -29,7 +29,7 @@ setup(
     entry_points={
         "console_scripts": [
             "yolo_detector = rbi_perception_pkg.yolo_detection_node:main",
-            "lidar_detector = rbi_perception_pkg.pcl_detection:main",
+            "calib_loader = rbi_perception_pkg.calib_loader:main",
         ],
     },
 )

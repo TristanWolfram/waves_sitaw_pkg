@@ -1,44 +1,11 @@
 #!/usr/bin/env python3
-"""
-Example ROS2 node that subscribes to a camera image topic, runs a YOLOv8 inference on each frame,
-and publishes an annotated image showing detected objects.
 
-Dependencies:
-  - ROS2 (e.g. Humble or later)
-  - rclpy
-  - sensor_msgs
-  - cv_bridge
-  - ultralytics (pip install ultralytics)
-  - OpenCV (pip install opencv-python)
-
-Usage:
-  1. Create a ROS2 Python package:
-       ros2 pkg create --build-type ament_python yolo_detector
-  2. Add dependencies to package.xml:
-       <depend>rclpy</depend>
-       <depend>sensor_msgs</depend>
-       <depend>cv_bridge</depend>
-  3. Copy this script into yolo_detector/yolo_detector/detect_node.py
-  4. In setup.py, ensure entry point:
-       entry_points={
-         'console_scripts': [
-           'detect_node = yolo_detector.detect_node:main',
-         ],
-       },
-  5. Install requirements: pip install ultralytics opencv-python
-  6. Build and source your workspace:
-       colcon build --packages-select yolo_detector
-       source install/setup.bash
-  7. Run:
-       ros2 run yolo_detector detect_node
-
-This node listens on '/camera/image_raw' and publishes on '/camera/image_detections'.
-"""
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from ultralytics import YOLO
+import cv2
 
 # Import from within the package
 from rbi_perception_pkg.settings import DETECTION_TOPIC, IMAGE_TOPIC, MODEL_WEIGHTS
@@ -70,7 +37,12 @@ class YOLODetectorNode(Node):
             return
 
         results = self.model(cv_image)[0]
-        annotated = results.plot()
+        annotated = cv_image.copy()
+        if results.boxes:
+            # Draw bounding boxes on the image
+            for box in results.boxes.xyxy:
+                x1, y1, x2, y2 = map(int, box.tolist())
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
         out_msg = self.bridge.cv2_to_imgmsg(annotated, "bgr8")
         out_msg.header = msg.header
