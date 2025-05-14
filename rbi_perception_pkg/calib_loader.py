@@ -6,6 +6,9 @@ from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, PointCloud2, Image
 from image_geometry import PinholeCameraModel
 from rclpy.duration import Duration
+from ultralytics import YOLO
+
+from rbi_perception_pkg.settings import MODEL_WEIGHTS
 
 import ros2_numpy
 import message_filters
@@ -24,9 +27,10 @@ class CalibrationNode(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
-
+        self.yolo_model = YOLO(MODEL_WEIGHTS)
         
         self.cv_bridge = CvBridge()
+        self.get_logger().info(f"Loaded YOLO weights: {MODEL_WEIGHTS}")
 
         img_sub = message_filters.Subscriber(
             self, Image, '/sim_cam_color_0/image_color'
@@ -99,6 +103,9 @@ class CalibrationNode(Node):
             self.get_logger().warn("Waiting for camera model and extrinsics to be set.")
             return
         
+        cv_img = self.cv_bridge.imgmsg_to_cv2(img_msg, desired_encoding='bgr8')
+        det_results = self.yolo_model(cv_img)[0]
+        
         xyz = ros2_numpy.point_cloud2.point_cloud2_to_array(pc_msg)
         xyz = xyz['xyz'].astype(np.float32)
 
@@ -117,20 +124,32 @@ class CalibrationNode(Node):
         uv = proj[:, :2] / proj[:, 2:]
 
         # draw on image
-        cv_img = self.cv_bridge.imgmsg_to_cv2(img_msg, desired_encoding='bgr8')
+
         H, W = cv_img.shape[:2]
-        for u, v in uv:
-            ui = int(round(u))
-            vi = int(round(v))
-            if 0 <= ui < W and 0 <= vi < H:
-                cv2.circle(cv_img, (ui, vi), 3, (0, 255, 0), -1)
+
+        for det in det_results.boxes:
+            x1, y1, x2, y2 = det.xyxy[0].tolist()
+            
+            cv2.rectangle(cv_img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 128, 255), 2)
+
+            inside_point = (
+                (uv[:, 0] > x1) & (uv[:, 0] < x2) &
+                (uv[:, 1] > y1) & (uv[:, 1] < y2)
+            )
+            uv_box = uv[inside_point]
+            pts_box = xyz_in_cam[inside_point]
+            for u, v in uv_box:
+                ui = int(round(u))
+                vi = int(round(v))
+                if 0 <= ui < W and 0 <= vi < H:
+                    cv2.circle(cv_img, (ui, vi), 3, (0, 255, 0), -1)
 
         # publish image
         out = self.cv_bridge.cv2_to_imgmsg(cv_img, encoding='bgr8')
         out.header = img_msg.header
 
         self.proj_pub.publish(out)
-        self.get_logger().info(f"Published projected image with {len(xyz_in_cam)} points.")
+        self.get_logger().info(f"Published projected image with {len(xyz_in_cam)} points and {len(det_results.boxes)} detections.")
             
 
 def main(args=None):
