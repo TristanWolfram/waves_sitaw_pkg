@@ -15,23 +15,16 @@ import message_filters
 from cv_bridge import CvBridge
 import cv2  
 
+from rbi_perception_pkg.Tracker import CombinedTracker
+
 class CalibrationNode(Node):
     def __init__(self):
         super().__init__('calib_node')
 
+        # Subscribtions
         self.cam_info_sub = self.create_subscription(
                 CameraInfo, '/sim_cam_color_0/camera_info', self.k_callback, 10
             )
-        
-        self.cam_model = PinholeCameraModel()
-        self.tf_buffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
-
-        self.yolo_model = YOLO(MODEL_WEIGHTS)
-        
-        self.cv_bridge = CvBridge()
-        self.get_logger().info(f"Loaded YOLO weights: {MODEL_WEIGHTS}")
-
         img_sub = message_filters.Subscriber(
             self, Image, '/sim_cam_color_0/image_color'
         )
@@ -39,14 +32,36 @@ class CalibrationNode(Node):
             self, PointCloud2, '/sim_LiDAR_depth/points'
         )
 
+        # Publisher
+        self.proj_pub = self.create_publisher(
+            Image, '/proj_image', 10
+        )
+
         self.sync = message_filters.ApproximateTimeSynchronizer(
             [img_sub, pc_sub], 10, 0.05, allow_headerless=True
         )
         self.sync.registerCallback(self.sync_callback)
+        
+        # YOLO
+        self.yolo_model = YOLO(MODEL_WEIGHTS)
+        self.get_logger().info(f"Loaded YOLO weights: {MODEL_WEIGHTS}")
 
-        self.proj_pub = self.create_publisher(
-            Image, '/proj_image', 10
+        # Helper objects
+        self.cam_model = PinholeCameraModel()
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        self.cv_bridge = CvBridge()
+
+        # Tracking
+        self.tracker = CombinedTracker(
+            iou_weight=0.5,      # adjust 0–1 to favor IoU vs. appearance
+            dist_thresh=0.7,     # maximum matching cost
+            max_missed=5         # drop tracks after 5 missing frames
         )
+
+        self.track_histories = {}
+        self.max_history_length = 50
+
 
     def k_callback(self, msg: CameraInfo):
 
@@ -104,45 +119,70 @@ class CalibrationNode(Node):
             return
         
         cv_img = self.cv_bridge.imgmsg_to_cv2(img_msg, desired_encoding='bgr8')
-        det_results = self.yolo_model(cv_img)[0]
+        det_results = self.yolo_model(
+            cv_img,
+            verbose=False,
+            show=False,
+            )[0]
         
         xyz = ros2_numpy.point_cloud2.point_cloud2_to_array(pc_msg)
         xyz = xyz['xyz'].astype(np.float32)
 
+        # PROJECTION
         # Transform the point cloud to the camera frame
         ones = np.ones((xyz.shape[0], 1), dtype=np.float32)
         xyz_h = np.hstack((xyz, ones))
         xyz_in_cam = (self.T_cam_lidar @ xyz_h.T).T[:, :3]
-
         # remove points behind the camera
         mask = xyz_in_cam[:, 2] > 0.0
         xyz_in_cam = xyz_in_cam[mask]
-
         # Project into pixel coords
         K = np.array(self.cam_model.intrinsicMatrix())
         proj = (K @ xyz_in_cam.T).T
         uv = proj[:, :2] / proj[:, 2:]
 
-        # draw on image
+        tracks = self.tracker.update(det_results, cv_img)
+        active_ids = { t["id"] for t in tracks }
+        for tid in list(self.track_histories):
+            if tid not in active_ids:
+                del self.track_histories[tid]
 
+        # VISUALIZATION
+        # ---------------------------------------------------------------------------------------------------------
         H, W = cv_img.shape[:2]
 
-        for det in det_results.boxes:
-            x1, y1, x2, y2 = det.xyxy[0].tolist()
-            
-            cv2.rectangle(cv_img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 128, 255), 2)
+        for track in tracks:
+            tid = track['id']
+            x1, y1, x2, y2 = map(int, track['box'])
+            cx, cy = track['center']
+
+            hist = self.track_histories.setdefault(tid, [])
+            hist.append((cx, cy))
+            if len(hist) > self.max_history_length:
+                hist.pop(0)
+
+            cv2.rectangle(cv_img, (x1, y1), (x2, y2), (0, 128, 255), 2)
+            cv2.putText(cv_img, f"ID: {tid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
             inside_point = (
                 (uv[:, 0] > x1) & (uv[:, 0] < x2) &
                 (uv[:, 1] > y1) & (uv[:, 1] < y2)
             )
             uv_box = uv[inside_point]
-            pts_box = xyz_in_cam[inside_point]
             for u, v in uv_box:
                 ui = int(round(u))
                 vi = int(round(v))
                 if 0 <= ui < W and 0 <= vi < H:
                     cv2.circle(cv_img, (ui, vi), 3, (0, 255, 0), -1)
+
+        for tid, hist in self.track_histories.items():
+            if len(hist) < 2:
+                continue
+            pts = np.array(hist, dtype=np.int32).reshape(-1, 1, 2)
+
+            color = ((tid * 37) % 255, (tid * 91) % 255, (tid * 53) % 255)
+            cv2.polylines(cv_img, [pts], isClosed=False, color=color, thickness=2)
+            
 
         # publish image
         out = self.cv_bridge.cv2_to_imgmsg(cv_img, encoding='bgr8')
@@ -150,6 +190,7 @@ class CalibrationNode(Node):
 
         self.proj_pub.publish(out)
         self.get_logger().info(f"Published projected image with {len(xyz_in_cam)} points and {len(det_results.boxes)} detections.")
+        # ---------------------------------------------------------------------------------------------------------
             
 
 def main(args=None):
