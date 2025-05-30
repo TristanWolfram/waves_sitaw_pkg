@@ -9,13 +9,14 @@ from ultralytics import YOLO
 model = YOLO("yolo12n.pt")
 
 # Open the video file
-video_path = "rbi_perception_pkg/testing/videos/sample1.mp4"
+video_name = "blueboat_stream3"
+video_path = f"rbi_perception_pkg/testing/videos/{video_name}.mp4"
 cap = cv2.VideoCapture(video_path)
 
 width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-fps = 20
-output_path = "rbi_perception_pkg/testing/videos/test.mp4"
+fps    = cap.get(cv2.CAP_PROP_FPS)
+output_path = f"rbi_perception_pkg/testing/videos/{video_name}_track_yolot.mp4"
 
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
