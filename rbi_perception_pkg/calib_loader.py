@@ -4,8 +4,10 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, PointCloud2, Image
-from image_geometry import PinholeCameraModel
+from visualization_msgs.msg import Marker, MarkerArray
 from rclpy.duration import Duration
+from geometry_msgs.msg import Point
+from image_geometry import PinholeCameraModel
 from ultralytics import YOLO
 
 from rbi_perception_pkg.settings import MODEL_WEIGHTS
@@ -36,6 +38,10 @@ class CalibrationNode(Node):
         self.proj_pub = self.create_publisher(
             Image, '/proj_image', 10
         )
+        self.frustum_pub = self.create_publisher(
+            MarkerArray, '/detection_frustums', 10
+        )
+        self.max_depth = 170.0
 
         self.sync = message_filters.ApproximateTimeSynchronizer(
             [img_sub, pc_sub], 10, 0.05, allow_headerless=True
@@ -140,6 +146,53 @@ class CalibrationNode(Node):
         K = np.array(self.cam_model.intrinsicMatrix())
         proj = (K @ xyz_in_cam.T).T
         uv = proj[:, :2] / proj[:, 2:]
+        k_inv = np.linalg.inv(K)
+        T_lidar_cam = np.linalg.inv(self.T_cam_lidar)
+        origin_lidar = (T_lidar_cam @ np.array([0.0, 0.0, 0.0, 1.0]))[:3]
+        frustum_markers = MarkerArray()
+
+        for idx, box in enumerate(det_results.boxes):
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            pix = np.array(
+                [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float64
+            )
+            dirs = (k_inv @ np.c_[pix, np.ones(4)].T).T
+            dirs /= dirs[:, 2:3]
+            far_cam = dirs * self.max_depth
+            far_lidar = (
+                T_lidar_cam @ np.c_[far_cam, np.ones(4)].T
+            ).T[:, :3]
+
+            marker = Marker()
+            marker.header = img_msg.header
+            marker.header.frame_id = 'LiDAR'
+            marker.ns = 'frustums'
+            marker.id = int(idx)
+            marker.type = Marker.LINE_LIST
+            marker.action = Marker.ADD
+            marker.scale.x = 0.05
+            marker.color.r = 1.0
+            marker.color.g = 0.0
+            marker.color.b = 0.0
+            marker.color.a = 1.0
+            marker.pose.orientation.w = 1.0
+            marker.lifetime = Duration(seconds=0.5).to_msg()
+
+            def add_line(p1, p2):
+                pt1 = Point(x=float(p1[0]), y=float(p1[1]), z=float(p1[2]))
+                pt2 = Point(x=float(p2[0]), y=float(p2[1]), z=float(p2[2]))
+                marker.points.append(pt1)
+                marker.points.append(pt2)
+
+            for p in far_lidar:
+                add_line(origin_lidar, p)
+
+            for i in range(4):
+                p1 = far_lidar[i]
+                p2 = far_lidar[(i + 1) % 4]
+                add_line(p1, p2)
+
+            frustum_markers.markers.append(marker)
 
         tracks = self.tracker.update(det_results, cv_img)
         active_ids = { t["id"] for t in tracks }
@@ -189,7 +242,10 @@ class CalibrationNode(Node):
         out.header = img_msg.header
 
         self.proj_pub.publish(out)
-        self.get_logger().info(f"Published projected image with {len(xyz_in_cam)} points and {len(det_results.boxes)} detections.")
+        self.frustum_pub.publish(frustum_markers)
+        self.get_logger().info(
+            f"Published projected image with {len(xyz_in_cam)} points and {len(det_results.boxes)} detections."
+        )
         # ---------------------------------------------------------------------------------------------------------
             
 
