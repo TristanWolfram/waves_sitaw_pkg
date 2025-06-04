@@ -146,6 +146,15 @@ class CalibrationNode(Node):
         K = np.array(self.cam_model.intrinsicMatrix())
         proj = (K @ xyz_in_cam.T).T
         uv = proj[:, :2] / proj[:, 2:]
+
+        tracks = self.tracker.update(det_results, cv_img)
+        active_ids = { t["id"] for t in tracks }
+        for tid in list(self.track_histories):
+            if tid not in active_ids:
+                del self.track_histories[tid]
+
+        # VISUALIZATION
+        # ---------------------------------------------------------------------------------------------------------
         k_inv = np.linalg.inv(K)
         T_lidar_cam = np.linalg.inv(self.T_cam_lidar)
         origin_lidar = (T_lidar_cam @ np.array([0.0, 0.0, 0.0, 1.0]))[:3]
@@ -194,14 +203,6 @@ class CalibrationNode(Node):
 
             frustum_markers.markers.append(marker)
 
-        tracks = self.tracker.update(det_results, cv_img)
-        active_ids = { t["id"] for t in tracks }
-        for tid in list(self.track_histories):
-            if tid not in active_ids:
-                del self.track_histories[tid]
-
-        # VISUALIZATION
-        # ---------------------------------------------------------------------------------------------------------
         H, W = cv_img.shape[:2]
 
         for track in tracks:
