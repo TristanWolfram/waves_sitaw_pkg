@@ -160,6 +160,7 @@ class CalibrationNode(Node):
         origin_lidar = (T_lidar_cam @ np.array([0.0, 0.0, 0.0, 1.0]))[:3]
         frustum_markers = MarkerArray()
 
+        # Crate frustum pyramid for each detection
         for idx, box in enumerate(det_results.boxes):
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             pix = np.array(
@@ -208,10 +209,8 @@ class CalibrationNode(Node):
         for track in tracks:
             tid = track['id']
             x1, y1, x2, y2 = map(int, track['box'])
-            cx, cy = track['center']
 
             hist = self.track_histories.setdefault(tid, [])
-            hist.append((cx, cy))
             if len(hist) > self.max_history_length:
                 hist.pop(0)
 
@@ -228,15 +227,6 @@ class CalibrationNode(Node):
                 vi = int(round(v))
                 if 0 <= ui < W and 0 <= vi < H:
                     cv2.circle(cv_img, (ui, vi), 3, (0, 255, 0), -1)
-
-        for tid, hist in self.track_histories.items():
-            if len(hist) < 2:
-                continue
-            pts = np.array(hist, dtype=np.int32).reshape(-1, 1, 2)
-
-            color = ((tid * 37) % 255, (tid * 91) % 255, (tid * 53) % 255)
-            cv2.polylines(cv_img, [pts], isClosed=False, color=color, thickness=2)
-            
 
         # publish image
         out = self.cv_bridge.cv2_to_imgmsg(cv_img, encoding='bgr8')
