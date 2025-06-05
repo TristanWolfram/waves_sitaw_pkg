@@ -18,6 +18,7 @@ from cv_bridge import CvBridge
 import cv2  
 
 from rbi_perception_pkg.Tracker import CombinedTracker
+from rbi_perception_pkg.Helpermethods import points_in_frustum, cluster_frustum_points
 
 class CalibrationNode(Node):
     def __init__(self):
@@ -42,6 +43,9 @@ class CalibrationNode(Node):
             MarkerArray, '/detection_frustums', 10
         )
         self.max_depth = 170.0
+        self.centroid_pub = self.create_publisher(
+            MarkerArray, '/cluster_centroids', 10
+        )
 
         self.sync = message_filters.ApproximateTimeSynchronizer(
             [img_sub, pc_sub], 10, 0.05, allow_headerless=True
@@ -153,12 +157,28 @@ class CalibrationNode(Node):
             if tid not in active_ids:
                 del self.track_histories[tid]
 
+        T_lidar_cam = np.linalg.inv(self.T_cam_lidar)
+        H, W = cv_img.shape[:2]
+        track_infos = []
+
+        for track in tracks:
+            tid = track["id"]
+            x1, y1, x2, y2 = map(int, track["box"])
+
+            idxs = points_in_frustum(xyz_in_cam, uv, (x1, y1, x2, y2), (H, W))
+            xyz_box = xyz_in_cam[idxs]
+            uv_box = uv[idxs]
+            _, centroid_cam, _ = cluster_frustum_points(xyz_box)
+            centroid_lidar = (T_lidar_cam @ np.append(centroid_cam, 1.0))[:3]
+
+            track_infos.append({"tid": tid, "bbox": (x1, y1, x2, y2), "uv_box": uv_box, "centroid": centroid_lidar})
+
         # VISUALIZATION
         # ---------------------------------------------------------------------------------------------------------
         k_inv = np.linalg.inv(K)
-        T_lidar_cam = np.linalg.inv(self.T_cam_lidar)
         origin_lidar = (T_lidar_cam @ np.array([0.0, 0.0, 0.0, 1.0]))[:3]
         frustum_markers = MarkerArray()
+        centroid_markers = MarkerArray()
 
         # Crate frustum pyramid for each detection
         for idx, box in enumerate(det_results.boxes):
@@ -204,11 +224,10 @@ class CalibrationNode(Node):
 
             frustum_markers.markers.append(marker)
 
-        H, W = cv_img.shape[:2]
 
-        for track in tracks:
-            tid = track['id']
-            x1, y1, x2, y2 = map(int, track['box'])
+        for info in track_infos:
+            tid = info['tid']
+            x1, y1, x2, y2 = info['bbox']
 
             hist = self.track_histories.setdefault(tid, [])
             if len(hist) > self.max_history_length:
@@ -217,11 +236,30 @@ class CalibrationNode(Node):
             cv2.rectangle(cv_img, (x1, y1), (x2, y2), (0, 128, 255), 2)
             cv2.putText(cv_img, f"ID: {tid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
-            inside_point = (
-                (uv[:, 0] > x1) & (uv[:, 0] < x2) &
-                (uv[:, 1] > y1) & (uv[:, 1] < y2)
-            )
-            uv_box = uv[inside_point]
+            uv_box = info['uv_box']
+            centroid_lidar = info['centroid']
+
+            centroid_marker = Marker()
+            centroid_marker.header = img_msg.header
+            centroid_marker.header.frame_id = 'LiDAR'
+            centroid_marker.ns = 'centroids'
+            centroid_marker.id = int(tid)
+            centroid_marker.type = Marker.SPHERE
+            centroid_marker.action = Marker.ADD
+            centroid_marker.scale.x = 1.0
+            centroid_marker.scale.y = 1.0
+            centroid_marker.scale.z = 1.0
+            centroid_marker.color.r = 0.0
+            centroid_marker.color.g = 1.0
+            centroid_marker.color.b = 0.0
+            centroid_marker.color.a = 1.0
+            centroid_marker.pose.orientation.w = 1.0
+            centroid_marker.pose.position.x = float(centroid_lidar[0])
+            centroid_marker.pose.position.y = float(centroid_lidar[1])
+            centroid_marker.pose.position.z = float(centroid_lidar[2])
+            centroid_marker.lifetime = Duration(seconds=0.5).to_msg()
+            centroid_markers.markers.append(centroid_marker)
+
             for u, v in uv_box:
                 ui = int(round(u))
                 vi = int(round(v))
@@ -234,6 +272,7 @@ class CalibrationNode(Node):
 
         self.proj_pub.publish(out)
         self.frustum_pub.publish(frustum_markers)
+        self.centroid_pub.publish(centroid_markers)
         self.get_logger().info(
             f"Published projected image with {len(xyz_in_cam)} points and {len(det_results.boxes)} detections."
         )
