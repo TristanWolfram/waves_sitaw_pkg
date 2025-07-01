@@ -1,0 +1,1 @@
+rosimg2mp4 -i /sim_cam_color_0/img_color -o WINDMILL_0 -fs 960 540 -vf 25
