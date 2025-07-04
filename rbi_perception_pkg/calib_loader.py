@@ -4,6 +4,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, PointCloud2, Image
+from rclpy.duration import Duration
 from image_geometry import PinholeCameraModel
 from ultralytics import YOLO
 

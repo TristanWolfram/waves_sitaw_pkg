@@ -30,6 +30,7 @@ setup(
         "console_scripts": [
             "yolo_detector = rbi_perception_pkg.yolo_detection_node:main",
             "calib_loader = rbi_perception_pkg.calib_loader:main",
+            "export_one_img_and_pointcloud = rbi_perception_pkg.export_one_img_and_pointcloud:main",
         ],
     },
 )
