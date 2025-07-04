@@ -152,7 +152,7 @@ class CalibrationNode(Node):
         uv = proj[:, :2] / proj[:, 2:]
 
         tracks = self.tracker.update(det_results, cv_img)
-        active_ids = { t["id"] for t in tracks }
+        active_ids = {t["id"] for t in tracks}
         for tid in list(self.track_histories):
             if tid not in active_ids:
                 del self.track_histories[tid]
