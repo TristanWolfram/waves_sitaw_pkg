@@ -23,75 +23,58 @@ def appearance_feature(frame, box):
     return patch.reshape(-1,3).mean(axis=0) / 255.0
 
 class Track:
-    __slots__ = ("id", "bbox", "feat", "cluster", "missed")
-
-    def __init__(self, tid, bbox, feat, cluster):
-        self.id = tid
-        self.bbox = bbox  # [x1,y1,x2,y2]
-        self.feat = feat  # appearance descriptor
-        self.cluster = cluster  # 3-D centroid of frustum points
-        self.missed = 0  # frames since last match
+    __slots__ = ("id","bbox","feat","missed")
+    def __init__(self, tid, bbox, feat):
+        self.id     = tid
+        self.bbox   = bbox    # [x1,y1,x2,y2]
+        self.feat   = feat    # appearance descriptor
+        self.missed = 0       # frames since last match
 
 class CombinedTracker:
-    def __init__(self, iou_weight=0.4, app_weight=0.4, cluster_weight=0.2,
-                 dist_thresh=0.7, max_missed=5):
-        """Multi-cue tracker using IoU, appearance and cluster distance.
-
-        The three weight parameters determine the influence of each cost
-        component when matching detections to existing tracks.
+    def __init__(self, iou_weight=0.5, dist_thresh=0.7, max_missed=5):
         """
-
-        self.iou_w = iou_weight
-        self.app_w = app_weight
-        self.clust_w = cluster_weight
-        self.thresh = dist_thresh
+        iou_weight: weight for IoU vs. appearance distance
+        dist_thresh: maximum allowed combined cost to accept a match
+        max_missed: how many frames to keep “lost” tracks alive
+        """
+        self.iou_w      = iou_weight
+        self.thresh     = dist_thresh
         self.max_missed = max_missed
-        self.next_id = 0
-        self.tracks = []
+        self.next_id    = 0
+        self.tracks     = []
 
-    def _compute_cost_matrix(self, boxes, feats, clusters):
+    def _compute_cost_matrix(self, boxes, feats):
         N = len(self.tracks)
         M = len(boxes)
         cost = np.zeros((N, M), dtype=float)
         for i, tr in enumerate(self.tracks):
-            for j, (b, f, c) in enumerate(zip(boxes, feats, clusters)):
+            for j, (b, f) in enumerate(zip(boxes, feats)):
                 c_iou = 1.0 - iou(tr.bbox, b)
                 c_app = np.linalg.norm(tr.feat - f)
-                c_clu = np.linalg.norm(tr.cluster - c)
-                cost[i, j] = (
-                    self.iou_w * c_iou +
-                    self.app_w * c_app +
-                    self.clust_w * c_clu
-                )
+                cost[i, j] = self.iou_w * c_iou + (1-self.iou_w) * c_app
         return cost
 
-    def update(self, det_results, frame, clusters):
-        """Update tracker state with new detections.
-
-        Args:
-            det_results: Output of ``YOLO(frame)``.
-            frame: BGR image used for the appearance descriptor.
-            clusters: List of 3-D cluster centroids corresponding to each
-                detection bounding box.
-
-        Returns:
-            A list of dictionaries with ``id``, ``box`` and ``center`` for
-            visualization.
+    def update(self, det_results, frame):
+        """
+        det_results: the YOLO results object (from model(frame)[0])
+        frame: BGR image (for appearance_feature)
+        Returns list of dicts {"id", "box", "center"}
         """
         # --- 1) extract detections + features
         boxes = []
         feats = []
         for det in det_results.boxes:
-            x1, y1, x2, y2 = det.xyxy[0].tolist()
-            boxes.append([x1, y1, x2, y2])
-            feats.append(appearance_feature(frame, (x1, y1, x2, y2)))
+            x1,y1,x2,y2 = det.xyxy[0].tolist()
+            boxes.append([x1,y1,x2,y2])
+            feats.append(appearance_feature(frame, (x1,y1,x2,y2)))
 
         if not self.tracks:
-            for b, f, c in zip(boxes, feats, clusters):
-                self.tracks.append(Track(self.next_id, b, f, c))
+            # initialize all as new tracks
+            for b,f in zip(boxes, feats):
+                self.tracks.append(Track(self.next_id, b, f))
                 self.next_id += 1
         else:
-            cost = self._compute_cost_matrix(boxes, feats, clusters)
+            cost = self._compute_cost_matrix(boxes, feats)
             # Hungarian assignment
             row_idx, col_idx = linear_sum_assignment(cost)
 
@@ -101,9 +84,8 @@ class CombinedTracker:
             for r, c in zip(row_idx, col_idx):
                 if cost[r,c] < self.thresh:
                     tr = self.tracks[r]
-                    tr.bbox = boxes[c]
-                    tr.feat = feats[c]
-                    tr.cluster = clusters[c]
+                    tr.bbox   = boxes[c]
+                    tr.feat   = feats[c]
                     tr.missed = 0
                     assigned_tracks.add(r)
                     assigned_dets.add(c)
@@ -116,9 +98,9 @@ class CombinedTracker:
             self.tracks = [tr for tr in self.tracks if tr.missed <= self.max_missed]
 
             # --- 4) create new tracks for unmatched detections
-            for j, (b, f, c) in enumerate(zip(boxes, feats, clusters)):
+            for j, (b,f) in enumerate(zip(boxes, feats)):
                 if j not in assigned_dets:
-                    self.tracks.append(Track(self.next_id, b, f, c))
+                    self.tracks.append(Track(self.next_id, b, f))
                     self.next_id += 1
 
         # --- 5) return simple list for visualization
