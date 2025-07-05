@@ -92,28 +92,26 @@ class CalibrationVisualizer:
                         0.5, (255, 255, 255), 2)
 
             uv_box = info['uv_box']
-            centroid_lidar = info['centroid']
+            axis_line = info['axis_line']
 
-            centroid_marker = Marker()
-            centroid_marker.header = img_msg.header
-            centroid_marker.header.frame_id = 'LiDAR'
-            centroid_marker.ns = 'centroids'
-            centroid_marker.id = int(tid)
-            centroid_marker.type = Marker.SPHERE
-            centroid_marker.action = Marker.ADD
-            centroid_marker.scale.x = 1.0
-            centroid_marker.scale.y = 1.0
-            centroid_marker.scale.z = 1.0
-            centroid_marker.color.r = 0.0
-            centroid_marker.color.g = 1.0
-            centroid_marker.color.b = 0.0
-            centroid_marker.color.a = 1.0
-            centroid_marker.pose.orientation.w = 1.0
-            centroid_marker.pose.position.x = float(centroid_lidar[0])
-            centroid_marker.pose.position.y = float(centroid_lidar[1])
-            centroid_marker.pose.position.z = float(centroid_lidar[2])
-            centroid_marker.lifetime = Duration(seconds=0.5).to_msg()
-            centroid_markers.markers.append(centroid_marker)
+            axis_marker = Marker()
+            axis_marker.header = img_msg.header
+            axis_marker.header.frame_id = 'LiDAR'
+            axis_marker.ns = 'centroids'
+            axis_marker.id = int(tid)
+            axis_marker.type = Marker.LINE_STRIP
+            axis_marker.action = Marker.ADD
+            axis_marker.scale.x = 0.2
+            axis_marker.color.r = 0.0
+            axis_marker.color.g = 0.0
+            axis_marker.color.b = 1.0
+            axis_marker.color.a = 1.0
+            axis_marker.pose.orientation.w = 1.0
+            axis_marker.lifetime = Duration(seconds=0.5).to_msg()
+            for p in axis_line:
+                pt = Point(x=float(p[0]), y=float(p[1]), z=float(p[2]))
+                axis_marker.points.append(pt)
+            centroid_markers.markers.append(axis_marker)
 
             for u, v in uv_box:
                 ui = int(round(u))

@@ -35,8 +35,8 @@ def points_in_frustum(lidar_xyz: np.array,
 
 def cluster_frustum_points(
     frustum_xyz: np.ndarray, bins: int = 60, sigma: int = 2
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Estimate a cluster centroid using a depth histogram.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[np.ndarray, np.ndarray]]:
+    """Estimate a cluster centroid and axis line using a depth histogram.
 
     The points inside the provided frustum are histogrammed along the Z-axis.
     The highest histogram bin is selected and all points within ``sigma`` bins
@@ -49,11 +49,17 @@ def cluster_frustum_points(
 
     Returns:
         ``cluster_mask`` selecting the points used for the centroid,
-        the centroid itself and the selected points.
+        the centroid itself, the selected points and the axis line
+        ``(left_point, right_point)``.
     """
 
     if frustum_xyz.size == 0:
-        return np.zeros(0, dtype=bool), np.array([0.0, 0.0, 0.0]), frustum_xyz
+        return (
+            np.zeros(0, dtype=bool),
+            np.array([0.0, 0.0, 0.0]),
+            frustum_xyz,
+            (np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0])),
+        )
 
     depths = frustum_xyz[:, 2]
     hist, bin_edges = np.histogram(depths, bins=bins)
@@ -75,4 +81,28 @@ def cluster_frustum_points(
     else:
         centroid = cluster_points.mean(axis=0)
 
-    return mask, centroid, cluster_points
+    # ------------------------------------------------------------------
+    # Estimate axis line by expanding left/right until histogram gap
+    # (bin with zero count) is found. The Z values at those gaps are
+    # converted back to actual points by taking the closest points
+    # along the depth dimension.
+    left_idx = peak_idx
+    while left_idx > 0 and hist[left_idx] > 0:
+        left_idx -= 1
+    if hist[left_idx] > 0:
+        z_left = bin_edges[0]
+    else:
+        z_left = bin_edges[left_idx + 1]
+
+    right_idx = peak_idx
+    while right_idx < len(hist) - 1 and hist[right_idx] > 0:
+        right_idx += 1
+    if hist[right_idx] > 0:
+        z_right = bin_edges[-1]
+    else:
+        z_right = bin_edges[right_idx]
+
+    left_point = frustum_xyz[np.argmin(np.abs(depths - z_left))]
+    right_point = frustum_xyz[np.argmin(np.abs(depths - z_right))]
+
+    return mask, centroid, cluster_points, (left_point, right_point)

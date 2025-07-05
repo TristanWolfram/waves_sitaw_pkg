@@ -156,10 +156,18 @@ class CalibrationNode(Node):
             idxs = points_in_frustum(xyz_in_cam, uv, (x1, y1, x2, y2), (H, W))
             xyz_box = xyz_in_cam[idxs]
             uv_box = uv[idxs]
-            _, centroid_cam, _ = cluster_frustum_points(xyz_box)
+            _, centroid_cam, _, axis_line_cam = cluster_frustum_points(xyz_box)
             centroid_lidar = (T_lidar_cam @ np.append(centroid_cam, 1.0))[:3]
+            p_left = (T_lidar_cam @ np.append(axis_line_cam[0], 1.0))[:3]
+            p_right = (T_lidar_cam @ np.append(axis_line_cam[1], 1.0))[:3]
 
-            track_infos.append({"tid": tid, "bbox": (x1, y1, x2, y2), "uv_box": uv_box, "centroid": centroid_lidar})
+            track_infos.append({
+                "tid": tid,
+                "bbox": (x1, y1, x2, y2),
+                "uv_box": uv_box,
+                "centroid": centroid_lidar,
+                "axis_line": (p_left, p_right),
+            })
         # VISUALIZATION
         # ------------------------------------------------------------------------------
         self.visualizer.publish(
