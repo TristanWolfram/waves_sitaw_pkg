@@ -1,4 +1,6 @@
 import numpy as np
+"""Helper methods for point cloud / image processing."""
+
 from sklearn.cluster import DBSCAN
 
 def points_in_frustum(lidar_xyz: np.array,
@@ -31,44 +33,46 @@ def points_in_frustum(lidar_xyz: np.array,
 
     return np.where(mask)[0]
 
-def cluster_frustum_points(frustum_xyz: np.ndarray,
-                           eps: float = 0.3,
-                           min_samples: int = 10):
-    """Cluster 3D points within a frustum using DBSCAN and return the largest cluster.
+def cluster_frustum_points(
+    frustum_xyz: np.ndarray, bins: int = 60, sigma: int = 2
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Estimate a cluster centroid using a depth histogram.
+
+    The points inside the provided frustum are histogrammed along the Z-axis.
+    The highest histogram bin is selected and all points within ``sigma`` bins
+    around this peak are averaged to obtain the cluster centroid.
 
     Args:
-        frustum_xyz (np.ndarray[K,3]): Points in the frustum in 3D space.
-        eps (float): DBSCAN ``eps`` parameter in metres.
-        min_samples (int): Minimum number of points required to form a cluster.
+        frustum_xyz: Points belonging to a single detection frustum ``(N, 3)``.
+        bins: Number of histogram bins along the depth axis.
+        sigma: Half-width (in bins) of the neighborhood around the peak.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray, np.ndarray]: ``cluster_mask`` selecting the
-            largest cluster, the centroid of that cluster and the clustered
-            points themselves.
+        ``cluster_mask`` selecting the points used for the centroid,
+        the centroid itself and the selected points.
     """
 
-    if frustum_xyz.shape[0] == 0:
+    if frustum_xyz.size == 0:
         return np.zeros(0, dtype=bool), np.array([0.0, 0.0, 0.0]), frustum_xyz
 
-    if frustum_xyz.shape[0] < min_samples:
-        centroid = np.mean(frustum_xyz, axis=0)
+    depths = frustum_xyz[:, 2]
+    hist, bin_edges = np.histogram(depths, bins=bins)
+
+    peak_idx = int(np.argmax(hist))
+    start = max(peak_idx - sigma, 0)
+    end = min(peak_idx + sigma + 1, len(hist))
+
+    z_min = bin_edges[start]
+    z_max = bin_edges[end]
+
+    mask = (depths >= z_min) & (depths < z_max)
+    cluster_points = frustum_xyz[mask]
+
+    if cluster_points.size == 0:
+        centroid = frustum_xyz.mean(axis=0)
         mask = np.ones(frustum_xyz.shape[0], dtype=bool)
-        return mask, centroid, frustum_xyz
+        cluster_points = frustum_xyz
+    else:
+        centroid = cluster_points.mean(axis=0)
 
-    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(frustum_xyz)
-    labels = clustering.labels_
-
-    unique_labels = set(labels)
-    unique_labels.discard(-1)
-
-    if not unique_labels:
-        centroid = np.mean(frustum_xyz, axis=0)
-        mask = np.ones(frustum_xyz.shape[0], dtype=bool)
-        return mask, centroid, frustum_xyz
-
-    best_label = max(unique_labels, key=lambda lbl: np.sum(labels == lbl))
-    cluster_mask = labels == best_label
-    cluster_points = frustum_xyz[cluster_mask]
-    centroid = np.mean(cluster_points, axis=0)
-
-    return cluster_mask, centroid, cluster_points
+    return mask, centroid, cluster_points
