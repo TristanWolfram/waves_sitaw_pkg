@@ -54,11 +54,9 @@ class CalibrationNode(Node):
 
         # Tracking
         self.tracker = CombinedTracker(
-            iou_weight=0.4,
-            app_weight=0.4,
-            cluster_weight=0.2,
-            dist_thresh=0.7,
-            max_missed=5,
+            iou_weight=0.5,      # adjust 0–1 to favor IoU vs. appearance
+            dist_thresh=0.7,     # maximum matching cost
+            max_missed=5         # drop tracks after 5 missing frames
         )
 
 
@@ -141,17 +139,7 @@ class CalibrationNode(Node):
         proj = (K @ xyz_in_cam.T).T
         uv = proj[:, :2] / proj[:, 2:]
 
-        H, W = cv_img.shape[:2]
-
-        det_clusters = []
-        for det in det_results.boxes:
-            x1, y1, x2, y2 = map(int, det.xyxy[0].tolist())
-            idxs = points_in_frustum(xyz_in_cam, uv, (x1, y1, x2, y2), (H, W))
-            xyz_box = xyz_in_cam[idxs]
-            _, centroid_cam, _ = cluster_frustum_points(xyz_box)
-            det_clusters.append(centroid_cam)
-
-        tracks = self.tracker.update(det_results, cv_img, det_clusters)
+        tracks = self.tracker.update(det_results, cv_img)
         active_ids = {t["id"] for t in tracks}
         for tid in list(self.visualizer.track_histories):
             if tid not in active_ids:
