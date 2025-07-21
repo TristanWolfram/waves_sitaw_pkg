@@ -1,4 +1,6 @@
 rbi_perception_pkg/testing/videos
+rbi_perception_pkg/testing/pointcloud_img_data/*.png
+rbi_perception_pkg/testing/pointcloud_img_data/*.ply
 
 *.pt
 *.onnx
