@@ -1,4 +1,5 @@
-# rbi_perception_pkg
+# WAVES - Waterborn Agents in Virtual Environment Simulations
+## Perception Package
 
 ## Overview
 `rbi_perception_pkg` provides ROS 2 nodes that subscribe to synchronized RGB images and LiDAR point clouds. Furthermore a pipline is used to perform object detection within images and sensor fusion to find the detected objects position. There are also a lot of testing scripts mainly for visualization and tryouts of different methods.
